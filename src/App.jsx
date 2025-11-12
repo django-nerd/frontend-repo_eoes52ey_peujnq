@@ -1,169 +1,177 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useState, useEffect } from 'react'
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL || ''
-
-function UploadForm({ onUploaded }) {
+function App() {
   const [file, setFile] = useState(null)
   const [title, setTitle] = useState('')
   const [artist, setArtist] = useState('')
   const [description, setDescription] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+  const [overview, setOverview] = useState(null)
 
-  const canSubmit = file && title && artist && !loading
+  const backend = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
-  const handleSubmit = async (e) => {
+  useEffect(() => {
+    const loadOverview = async () => {
+      try {
+        const res = await fetch(`${backend}/api/analytics/overview`)
+        if (res.ok) {
+          const data = await res.json()
+          setOverview(data)
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    loadOverview()
+  }, [])
+
+  const onSubmit = async (e) => {
     e.preventDefault()
-    if (!canSubmit) return
-    setLoading(true)
     setError('')
-    try {
-      const form = new FormData()
-      form.append('file', file)
-      form.append('title', title)
-      form.append('artist', artist)
-      form.append('description', description)
 
-      const res = await fetch(`${API_BASE}/api/songs`, {
+    if (!file) {
+      setError('Please select an audio file')
+      return
+    }
+    if (!title || !artist) {
+      setError('Please provide title and artist')
+      return
+    }
+
+    const form = new FormData()
+    form.append('file', file)
+    form.append('title', title)
+    form.append('artist', artist)
+    if (description) form.append('description', description)
+
+    setUploading(true)
+    try {
+      const res = await fetch(`${backend}/api/songs/upload`, {
         method: 'POST',
         body: form,
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || 'Upload failed')
+      }
       const data = await res.json()
-      onUploaded(data)
-      setFile(null)
+      setResult({
+        token: data.token,
+        download_url: `${backend}${data.download_url.startsWith('/') ? '' : '/'}${data.download_url}`,
+        share_url: `${window.location.origin}/s/${data.token}`,
+      })
       setTitle('')
       setArtist('')
       setDescription('')
-    } catch (err) {
-      setError('Upload failed. Please try again with a valid audio file.')
+      setFile(null)
+    } catch (e) {
+      setError(e.message)
     } finally {
-      setLoading(false)
+      setUploading(false)
     }
   }
 
-  return (
-    <form onSubmit={handleSubmit} className="bg-white/70 backdrop-blur p-4 rounded-xl shadow-sm space-y-3">
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Audio file</label>
-        <input type="file" accept="audio/*" onChange={(e)=>setFile(e.target.files?.[0]||null)} className="mt-1 block w-full text-sm" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Title</label>
-          <input value={title} onChange={(e)=>setTitle(e.target.value)} className="mt-1 w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Song title" />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Artist</label>
-          <input value={artist} onChange={(e)=>setArtist(e.target.value)} className="mt-1 w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Artist name" />
-        </div>
-      </div>
-      <div>
-        <label className="block text-sm font-medium text-gray-700">Description</label>
-        <textarea value={description} onChange={(e)=>setDescription(e.target.value)} className="mt-1 w-full border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Optional"></textarea>
-      </div>
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      <button disabled={!canSubmit} className="w-full sm:w-auto inline-flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-md">
-        {loading ? 'Uploading…' : 'Upload song'}
-      </button>
-    </form>
-  )
-}
-
-function SongCard({ song }) {
-  const shareUrl = useMemo(() => `${window.location.origin}?slug=${song.slug}`, [song.slug])
-  return (
-    <div className="p-4 bg-white rounded-xl shadow-sm border">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">{song.title}</h3>
-          <p className="text-sm text-gray-600">by {song.artist}</p>
-        </div>
-        <a href={`${API_BASE}${song.download_url}`} className="text-blue-600 hover:underline" download>
-          Download
-        </a>
-      </div>
-      <div className="mt-2 flex items-center justify-between text-sm text-gray-600">
-        <span>{(song.size/1024/1024).toFixed(2)} MB</span>
-        <span>Views: {song.views} • Downloads: {song.downloads}</span>
-      </div>
-      <div className="mt-3">
-        <label className="block text-xs uppercase tracking-wide text-gray-500">Share link</label>
-        <div className="flex gap-2">
-          <input readOnly value={`${API_BASE}/api/songs/${song.slug}`} className="flex-1 border rounded-md px-2 py-1 text-sm" />
-          <button onClick={()=>{navigator.clipboard.writeText(`${API_BASE}/api/songs/${song.slug}`)}} className="px-3 py-1 text-sm bg-gray-100 rounded-md hover:bg-gray-200">Copy</button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Analytics({ data }) {
-  return (
-    <div className="bg-white/70 backdrop-blur p-4 rounded-xl shadow-sm grid grid-cols-3 gap-4 text-center">
-      <div>
-        <div className="text-2xl font-bold">{data.total_songs}</div>
-        <div className="text-gray-600 text-sm">Songs</div>
-      </div>
-      <div>
-        <div className="text-2xl font-bold">{data.total_views}</div>
-        <div className="text-gray-600 text-sm">Views</div>
-      </div>
-      <div>
-        <div className="text-2xl font-bold">{data.total_downloads}</div>
-        <div className="text-gray-600 text-sm">Downloads</div>
-      </div>
-    </div>
-  )
-}
-
-function App() {
-  const [songs, setSongs] = useState([])
-  const [analytics, setAnalytics] = useState({ total_songs: 0, total_views: 0, total_downloads: 0 })
-  const [highlight, setHighlight] = useState(null)
-
-  const load = async () => {
-    const [sRes, aRes] = await Promise.all([
-      fetch(`${API_BASE}/api/songs`),
-      fetch(`${API_BASE}/api/analytics`)
-    ])
-    const [s, a] = await Promise.all([sRes.json(), aRes.json()])
-    setSongs(s)
-    setAnalytics(a)
-  }
-
-  useEffect(() => {
-    load()
-  }, [])
-
-  const onUploaded = (song) => {
-    setSongs(prev => [song, ...prev])
-    setAnalytics(a => ({ ...a, total_songs: a.total_songs + 1 }))
-    setHighlight(song.slug)
-    setTimeout(()=>setHighlight(null), 3000)
+  const copy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      alert('Link copied!')
+    } catch {}
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-sky-50">
-      <div className="max-w-3xl mx-auto px-4 py-10 space-y-8">
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-gray-900">Song Distribution Platform</h1>
-          <p className="text-gray-600">Upload, share, and track downloads globally.</p>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-sky-50 to-emerald-50">
+      <div className="max-w-3xl mx-auto px-4 py-12">
+        <header className="text-center mb-10">
+          <h1 className="text-4xl font-extrabold text-gray-900">SongShare</h1>
+          <p className="text-gray-600 mt-2">Upload your track, get a link, share it anywhere. Anyone with the link can download.</p>
+        </header>
 
-        <Analytics data={analytics} />
-        <UploadForm onUploaded={onUploaded} />
-
-        <div className="grid gap-4">
-          {songs.map(s => (
-            <div key={s.slug} className={highlight === s.slug ? 'ring-2 ring-blue-400 rounded-xl' : ''}>
-              <SongCard song={s} />
+        <div className="bg-white rounded-xl shadow p-6">
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Audio file</label>
+              <input
+                type="file"
+                accept="audio/*,.mp3,.wav,.flac,.aac,.ogg,.m4a"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="block w-full text-sm text-gray-900 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+              />
             </div>
-          ))}
-          {songs.length === 0 && (
-            <div className="text-center text-gray-500">No songs yet. Be the first to upload!</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input value={title} onChange={(e)=>setTitle(e.target.value)} className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Song title" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Artist</label>
+                <input value={artist} onChange={(e)=>setArtist(e.target.value)} className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="Artist or uploader" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea value={description} onChange={(e)=>setDescription(e.target.value)} className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" rows={3} placeholder="Optional notes" />
+            </div>
+
+            {error && <p className="text-red-600 text-sm">{error}</p>}
+
+            <button disabled={uploading} className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded shadow disabled:opacity-60">
+              {uploading ? 'Uploading…' : 'Upload & Get Link'}
+            </button>
+          </form>
+
+          {result && (
+            <div className="mt-6 border-t pt-6 space-y-3">
+              <h3 className="font-semibold text-gray-800">Your links</h3>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
+                  <div className="text-sm text-gray-700 truncate mr-2">Share page</div>
+                  <div className="flex items-center gap-2">
+                    <a href={result.share_url} className="text-indigo-600 text-sm hover:underline" target="_blank" rel="noreferrer">Open</a>
+                    <button onClick={()=>copy(result.share_url)} className="text-xs px-2 py-1 bg-gray-800 text-white rounded">Copy</button>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
+                  <div className="text-sm text-gray-700 truncate mr-2">Direct download</div>
+                  <div className="flex items-center gap-2">
+                    <a href={result.download_url} className="text-indigo-600 text-sm hover:underline" target="_blank" rel="noreferrer">Download</a>
+                    <button onClick={()=>copy(result.download_url)} className="text-xs px-2 py-1 bg-gray-800 text-white rounded">Copy</button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </div>
+
+        <section className="mt-10">
+          <h2 className="text-xl font-bold text-gray-900 mb-3">Global analytics</h2>
+          {overview ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl shadow p-4">
+                <p className="text-sm text-gray-500">Total songs</p>
+                <p className="text-2xl font-semibold">{overview.total_songs}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow p-4">
+                <p className="text-sm text-gray-500">Total downloads</p>
+                <p className="text-2xl font-semibold">{overview.total_downloads}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow p-4 md:col-span-1">
+                <p className="text-sm text-gray-500 mb-2">Top songs</p>
+                <ul className="space-y-1 max-h-32 overflow-auto">
+                  {overview.top_songs?.map((s, i) => (
+                    <li key={i} className="text-sm text-gray-700 flex justify-between">
+                      <span className="truncate mr-2">{s.title} — {s.artist}</span>
+                      <span className="text-gray-500">{s.download_count || 0}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          ) : (
+            <p className="text-gray-600">Loading analytics…</p>
+          )}
+        </section>
       </div>
     </div>
   )
